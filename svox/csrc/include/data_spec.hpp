@@ -122,6 +122,10 @@ struct RenderOptions {
 
     bool density_softplus;
     float rgb_padding;
+
+    float cone_angle;
+    float near_plane;
+    float far_plane;
 };
 
 using QueryResult = std::tuple<torch::Tensor, torch::Tensor>;

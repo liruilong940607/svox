@@ -127,11 +127,22 @@ def convert_to_ndc(origins, directions, focal, w, h, near=1.0):
     return origins, directions
 
 
-def volume_sample(tree, rays: Rays, step_size: float, sigma_thresh: float):
+def volume_sample(
+    tree,
+    thresh: float,
+    rays: Rays,
+    step_size: float,
+    cone_angle: float = 3e-4,
+    near_plane: float = 0.0,
+    far_plane: float = 1e10,
+):
     opts = _C.RenderOptions()
     opts.step_size = step_size
-    opts.sigma_thresh = sigma_thresh
+    opts.sigma_thresh = thresh
     opts.density_softplus = False
+    opts.cone_angle = cone_angle
+    opts.near_plane = near_plane
+    opts.far_plane = far_plane
     return _C.volume_sample(tree._spec(), _rays_spec_from_rays(rays), opts)
 
 

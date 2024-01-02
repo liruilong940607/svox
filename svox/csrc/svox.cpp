@@ -100,7 +100,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def_readwrite("sigma_thresh", &RenderOptions::sigma_thresh)
         .def_readwrite("stop_thresh", &RenderOptions::stop_thresh)
         .def_readwrite("density_softplus", &RenderOptions::density_softplus)
-        .def_readwrite("rgb_padding", &RenderOptions::rgb_padding);
+        .def_readwrite("rgb_padding", &RenderOptions::rgb_padding)
+        .def_readwrite("cone_angle", &RenderOptions::cone_angle)
+        .def_readwrite("near_plane", &RenderOptions::near_plane)
+        .def_readwrite("far_plane", &RenderOptions::far_plane);
 
     m.def("query_vertical", &query_vertical);
     m.def("query_vertical_backward", &query_vertical_backward);

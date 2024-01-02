@@ -194,6 +194,18 @@ _dda_unit(const scalar_t *__restrict__ cen, const scalar_t *__restrict__ invdir,
 }
 
 template <typename scalar_t>
+__device__ __inline__ float _calc_dt(const scalar_t t, const float cone_angle,
+                                     const float dt_min, const float dt_max) {
+    // return clamp(t * cone_angle, dt_min, dt_max);
+    float dt = t * cone_angle;
+    if (dt < dt_min)
+        dt = dt_min;
+    if (dt > dt_max)
+        dt = dt_max;
+    return dt;
+}
+
+template <typename scalar_t>
 __device__ __inline__ void
 trace_ray(PackedTreeSpec<scalar_t> &__restrict__ tree, SingleRaySpec<scalar_t> ray,
           RenderOptions &__restrict__ opt,
@@ -709,6 +721,8 @@ __device__ __inline__ void trace_ray_count_samples(
     PackedTreeSpec<scalar_t> &__restrict__ tree, SingleRaySpec<scalar_t> ray,
     RenderOptions &__restrict__ opt,
     torch::TensorAccessor<int32_t, 1, torch::RestrictPtrTraits, int32_t> cnt_out) {
+    const scalar_t delta_scale = _get_delta_scale(tree.scaling, ray.dir);
+
     scalar_t tmin, tmax;
     scalar_t invdir[3];
     const int data_dim = tree.data.size(4);
@@ -718,6 +732,8 @@ __device__ __inline__ void trace_ray_count_samples(
         invdir[i] = 1.0 / (ray.dir[i] + 1e-9);
     }
     _dda_unit(ray.origin, invdir, &tmin, &tmax);
+    tmin *= delta_scale; // grid scale to world scale
+    tmax *= delta_scale;
 
     cnt_out[0] = 0;
     if (tmax < 0 || tmin > tmax) {
@@ -726,13 +742,19 @@ __device__ __inline__ void trace_ray_count_samples(
     } else {
         scalar_t pos[3];
 
-        scalar_t t1 = tmin;
-        scalar_t t2 = tmin + opt.step_size;
+        scalar_t t1 = opt.near_plane;
+        scalar_t dt = _calc_dt(t1, opt.cone_angle, opt.step_size, 1e10f);
+        while (true) { // march until t1 is right after tmin.
+            if (t1 >= tmin)
+                break;
+            t1 += dt;
+        }
+        scalar_t t2 = t1 + dt;
         scalar_t cube_sz;
-        while (t2 < tmax) {
+        while (t2 < tmax && t2 < opt.far_plane) {
             scalar_t tmid = (t1 + t2) * 0.5;
             for (int j = 0; j < 3; ++j) {
-                pos[j] = ray.origin[j] + tmid * ray.dir[j];
+                pos[j] = ray.origin[j] + tmid / delta_scale * ray.dir[j];
             }
 
             int64_t node_id;
@@ -746,8 +768,8 @@ __device__ __inline__ void trace_ray_count_samples(
             if (sigma > opt.sigma_thresh) {
                 cnt_out[0] += 1;
             }
-            t1 += opt.step_size;
-            t2 += opt.step_size;
+            t1 = t2;
+            t2 = t1 + _calc_dt(t1, opt.cone_angle, opt.step_size, 1e10f);
         }
     }
 }
@@ -760,6 +782,8 @@ __device__ __inline__ void trace_ray_write_samples(
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> t1_out,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> t2_out,
     torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> rayid_out) {
+    const scalar_t delta_scale = _get_delta_scale(tree.scaling, ray.dir);
+
     scalar_t tmin, tmax;
     scalar_t invdir[3];
     const int data_dim = tree.data.size(4);
@@ -769,6 +793,8 @@ __device__ __inline__ void trace_ray_write_samples(
         invdir[i] = 1.0 / (ray.dir[i] + 1e-9);
     }
     _dda_unit(ray.origin, invdir, &tmin, &tmax);
+    tmin *= delta_scale; // grid scale to world scale
+    tmax *= delta_scale;
 
     int32_t base = offset[0];
     int32_t cnt = 0;
@@ -778,13 +804,19 @@ __device__ __inline__ void trace_ray_write_samples(
     } else {
         scalar_t pos[3];
 
-        scalar_t t1 = tmin;
-        scalar_t t2 = tmin + opt.step_size;
+        scalar_t t1 = opt.near_plane;
+        scalar_t dt = _calc_dt(t1, opt.cone_angle, opt.step_size, 1e10f);
+        while (true) { // march until t1 is right after tmin.
+            if (t1 >= tmin)
+                break;
+            t1 += dt;
+        }
+        scalar_t t2 = t1 + dt;
         scalar_t cube_sz;
-        while (t2 < tmax) {
+        while (t2 < tmax && t2 < opt.far_plane) {
             scalar_t tmid = (t1 + t2) * 0.5;
             for (int j = 0; j < 3; ++j) {
-                pos[j] = ray.origin[j] + tmid * ray.dir[j];
+                pos[j] = ray.origin[j] + tmid / delta_scale * ray.dir[j];
             }
 
             int64_t node_id;
@@ -801,8 +833,8 @@ __device__ __inline__ void trace_ray_write_samples(
                 rayid_out[base + cnt] = rayid;
                 cnt += 1;
             }
-            t1 += opt.step_size;
-            t2 += opt.step_size;
+            t1 = t2;
+            t2 = t1 + _calc_dt(t1, opt.cone_angle, opt.step_size, 1e10f);
         }
     }
 }
