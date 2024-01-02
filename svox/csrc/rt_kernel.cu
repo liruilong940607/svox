@@ -705,6 +705,109 @@ __device__ __inline__ void trace_ray_se_grad_hess(
 }
 
 template <typename scalar_t>
+__device__ __inline__ void trace_ray_count_samples(
+    PackedTreeSpec<scalar_t> &__restrict__ tree, SingleRaySpec<scalar_t> ray,
+    RenderOptions &__restrict__ opt,
+    torch::TensorAccessor<int32_t, 1, torch::RestrictPtrTraits, int32_t> cnt_out) {
+    scalar_t tmin, tmax;
+    scalar_t invdir[3];
+    const int data_dim = tree.data.size(4);
+
+#pragma unroll
+    for (int i = 0; i < 3; ++i) {
+        invdir[i] = 1.0 / (ray.dir[i] + 1e-9);
+    }
+    _dda_unit(ray.origin, invdir, &tmin, &tmax);
+
+    cnt_out[0] = 0;
+    if (tmax < 0 || tmin > tmax) {
+        // Ray doesn't hit box
+        return;
+    } else {
+        scalar_t pos[3];
+
+        scalar_t t1 = tmin;
+        scalar_t t2 = tmin + opt.step_size;
+        scalar_t cube_sz;
+        while (t2 < tmax) {
+            scalar_t tmid = (t1 + t2) * 0.5;
+            for (int j = 0; j < 3; ++j) {
+                pos[j] = ray.origin[j] + tmid * ray.dir[j];
+            }
+
+            int64_t node_id;
+            scalar_t *tree_val = query_single_from_root<scalar_t>(
+                tree.data, tree.child, pos, &cube_sz,
+                tree.weight_accum != nullptr ? &node_id : nullptr);
+
+            scalar_t sigma = tree_val[data_dim - 1];
+            if (opt.density_softplus)
+                sigma = _SOFTPLUS_M1(sigma);
+            if (sigma > opt.sigma_thresh) {
+                cnt_out[0] += 1;
+            }
+            t1 += opt.step_size;
+            t2 += opt.step_size;
+        }
+    }
+}
+
+template <typename scalar_t>
+__device__ __inline__ void trace_ray_write_samples(
+    PackedTreeSpec<scalar_t> &__restrict__ tree, SingleRaySpec<scalar_t> ray,
+    RenderOptions &__restrict__ opt, int32_t rayid,
+    torch::TensorAccessor<int32_t, 1, torch::RestrictPtrTraits, int32_t> offset,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> t1_out,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> t2_out,
+    torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> rayid_out) {
+    scalar_t tmin, tmax;
+    scalar_t invdir[3];
+    const int data_dim = tree.data.size(4);
+
+#pragma unroll
+    for (int i = 0; i < 3; ++i) {
+        invdir[i] = 1.0 / (ray.dir[i] + 1e-9);
+    }
+    _dda_unit(ray.origin, invdir, &tmin, &tmax);
+
+    int32_t base = offset[0];
+    int32_t cnt = 0;
+    if (tmax < 0 || tmin > tmax) {
+        // Ray doesn't hit box
+        return;
+    } else {
+        scalar_t pos[3];
+
+        scalar_t t1 = tmin;
+        scalar_t t2 = tmin + opt.step_size;
+        scalar_t cube_sz;
+        while (t2 < tmax) {
+            scalar_t tmid = (t1 + t2) * 0.5;
+            for (int j = 0; j < 3; ++j) {
+                pos[j] = ray.origin[j] + tmid * ray.dir[j];
+            }
+
+            int64_t node_id;
+            scalar_t *tree_val = query_single_from_root<scalar_t>(
+                tree.data, tree.child, pos, &cube_sz,
+                tree.weight_accum != nullptr ? &node_id : nullptr);
+
+            scalar_t sigma = tree_val[data_dim - 1];
+            if (opt.density_softplus)
+                sigma = _SOFTPLUS_M1(sigma);
+            if (sigma > opt.sigma_thresh) {
+                t1_out[base + cnt] = t1;
+                t2_out[base + cnt] = t2;
+                rayid_out[base + cnt] = rayid;
+                cnt += 1;
+            }
+            t1 += opt.step_size;
+            t2 += opt.step_size;
+        }
+    }
+}
+
+template <typename scalar_t>
 __global__ void render_ray_kernel(
     PackedTreeSpec<scalar_t> tree, PackedRaysSpec<scalar_t> rays, RenderOptions opt,
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> out) {
@@ -715,6 +818,36 @@ __global__ void render_ray_kernel(
     scalar_t dir[3] = {rays.dirs[tid][0], rays.dirs[tid][1], rays.dirs[tid][2]};
     trace_ray<scalar_t>(tree, SingleRaySpec<scalar_t>{origin, dir, &rays.vdirs[tid][0]},
                         opt, out[tid]);
+}
+
+template <typename scalar_t>
+__global__ void count_along_ray_kernel(
+    PackedTreeSpec<scalar_t> tree, PackedRaysSpec<scalar_t> rays, RenderOptions opt,
+    torch::PackedTensorAccessor32<int32_t, 2, torch::RestrictPtrTraits> out) {
+    CUDA_GET_THREAD_ID(tid, rays.origins.size(0));
+    scalar_t origin[3] = {rays.origins[tid][0], rays.origins[tid][1],
+                          rays.origins[tid][2]};
+    transform_coord<scalar_t>(origin, tree.offset, tree.scaling);
+    scalar_t dir[3] = {rays.dirs[tid][0], rays.dirs[tid][1], rays.dirs[tid][2]};
+    trace_ray_count_samples<scalar_t>(
+        tree, SingleRaySpec<scalar_t>{origin, dir, &rays.vdirs[tid][0]}, opt, out[tid]);
+}
+
+template <typename scalar_t>
+__global__ void sample_along_ray_kernel(
+    PackedTreeSpec<scalar_t> tree, PackedRaysSpec<scalar_t> rays, RenderOptions opt,
+    torch::PackedTensorAccessor32<int32_t, 2, torch::RestrictPtrTraits> offset,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> t1_out,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> t2_out,
+    torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> rayid_out) {
+    CUDA_GET_THREAD_ID(tid, rays.origins.size(0));
+    scalar_t origin[3] = {rays.origins[tid][0], rays.origins[tid][1],
+                          rays.origins[tid][2]};
+    transform_coord<scalar_t>(origin, tree.offset, tree.scaling);
+    scalar_t dir[3] = {rays.dirs[tid][0], rays.dirs[tid][1], rays.dirs[tid][2]};
+    trace_ray_write_samples<scalar_t>(
+        tree, SingleRaySpec<scalar_t>{origin, dir, &rays.vdirs[tid][0]}, opt, tid,
+        offset[tid], t1_out, t2_out, rayid_out);
 }
 
 template <typename scalar_t>
@@ -969,6 +1102,44 @@ torch::Tensor volume_render(TreeSpec &tree, RaysSpec &rays, RenderOptions &opt) 
     });
     CUDA_CHECK_ERRORS;
     return result;
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+volume_sample(TreeSpec &tree, RaysSpec &rays, RenderOptions &opt) {
+    tree.check();
+    rays.check();
+    DEVICE_GUARD(tree.data);
+    const auto Q = rays.origins.size(0);
+
+    auto_cuda_threads();
+    const int blocks = CUDA_N_BLOCKS_NEEDED(Q, cuda_n_threads);
+    torch::Tensor cnt =
+        torch::empty({Q, 1}, rays.origins.options().dtype(torch::kInt32));
+    AT_DISPATCH_FLOATING_TYPES(rays.origins.type(), __FUNCTION__, [&] {
+        device::count_along_ray_kernel<scalar_t><<<blocks, cuda_n_threads>>>(
+            tree, rays, opt,
+            cnt.packed_accessor32<int32_t, 2, torch::RestrictPtrTraits>());
+    });
+
+    torch::Tensor cumsum = torch::cumsum(cnt, 0, torch::kInt32);
+    torch::Tensor offset = cumsum - cnt;
+    int32_t N = cumsum[-1].item<int32_t>(); // total number of samples
+    torch::Tensor t1 = torch::empty({N}, rays.origins.options());
+    torch::Tensor t2 = torch::empty({N}, rays.origins.options());
+    torch::Tensor rayid =
+        torch::empty({N}, rays.origins.options().dtype(torch::kInt32));
+    AT_DISPATCH_FLOATING_TYPES(rays.origins.type(), __FUNCTION__, [&] {
+        device::sample_along_ray_kernel<scalar_t><<<blocks, cuda_n_threads>>>(
+            tree, rays, opt,
+            offset.packed_accessor32<int32_t, 2, torch::RestrictPtrTraits>(),
+            t1.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+            t2.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+            rayid.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>());
+    });
+
+    CUDA_CHECK_ERRORS;
+    return std::template tuple<torch::Tensor, torch::Tensor, torch::Tensor>(t1, t2,
+                                                                            rayid);
 }
 
 torch::Tensor volume_render_image(TreeSpec &tree, CameraSpec &cam, RenderOptions &opt) {

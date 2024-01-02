@@ -48,6 +48,9 @@ Tensor volume_render_image(TreeSpec &, CameraSpec &, RenderOptions &);
 Tensor volume_render_backward(TreeSpec &, RaysSpec &, RenderOptions &, Tensor);
 Tensor volume_render_image_backward(TreeSpec &, CameraSpec &, RenderOptions &, Tensor);
 
+std::tuple<Tensor, Tensor, Tensor> volume_sample(TreeSpec &, RaysSpec &,
+                                                 RenderOptions &);
+
 std::tuple<Tensor, Tensor, Tensor> se_grad(TreeSpec &, RaysSpec &, Tensor,
                                            RenderOptions &);
 std::tuple<Tensor, Tensor, Tensor> se_grad_persp(TreeSpec &, CameraSpec &,
@@ -107,6 +110,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("volume_render_image", &volume_render_image);
     m.def("volume_render_backward", &volume_render_backward);
     m.def("volume_render_image_backward", &volume_render_image_backward);
+
+    m.def("volume_sample", &volume_sample);
 
     m.def("se_grad", &se_grad);
     m.def("se_grad_persp", &se_grad_persp);
