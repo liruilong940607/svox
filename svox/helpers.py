@@ -21,7 +21,6 @@
 #  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 #  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 #  POSSIBILITY OF SUCH DAMAGE.
-import numpy as np
 import torch
 
 
@@ -184,6 +183,7 @@ class N3TreeView:
         :return: (n_leaves, 3) float
         """
         self._check_ver()
+        # TODO(ruilong): precompute corners for all nodes would be faster.
         return (
             self.tree._calc_corners(self._indexer()) - self.tree.offset
         ) / self.tree.invradius
@@ -198,6 +198,7 @@ class N3TreeView:
         :return: (n_leaves, 3) float
         """
         self._check_ver()
+        # TODO(ruilong): precompute corners for all nodes would be faster.
         return self.tree._calc_corners(self._indexer())
 
     def sample(self, n_samples, device=None):

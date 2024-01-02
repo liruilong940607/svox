@@ -1136,7 +1136,7 @@ torch::Tensor volume_render(TreeSpec &tree, RaysSpec &rays, RenderOptions &opt) 
     return result;
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 volume_sample(TreeSpec &tree, RaysSpec &rays, RenderOptions &opt) {
     tree.check();
     rays.check();
@@ -1169,9 +1169,11 @@ volume_sample(TreeSpec &tree, RaysSpec &rays, RenderOptions &opt) {
             rayid.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>());
     });
 
+    torch::Tensor packed_info = torch::cat({offset, cnt}, 1);
+
     CUDA_CHECK_ERRORS;
-    return std::template tuple<torch::Tensor, torch::Tensor, torch::Tensor>(t1, t2,
-                                                                            rayid);
+    return std::template tuple<torch::Tensor, torch::Tensor, torch::Tensor,
+                               torch::Tensor>(t1, t2, packed_info, rayid);
 }
 
 torch::Tensor volume_render_image(TreeSpec &tree, CameraSpec &cam, RenderOptions &opt) {

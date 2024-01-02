@@ -26,7 +26,6 @@ Sparse voxel N^3 tree
 """
 
 import math
-import os.path as osp
 from warnings import warn
 
 import numpy as np
@@ -732,7 +731,7 @@ class N3Tree(nn.Module):
                 # Filter by depth & leaves
                 good_mask = (depths < self.depth_limit) & (self.child[sel] == 0)
                 sel = [t[good_mask] for t in sel]
-                leaf_node = torch.stack(sel, dim=-1).to(device=self.data.device)
+                leaf_node = torch.stack(sel, dim=-1)
                 num_nc = len(sel[0])
                 if num_nc == 0:
                     # Nothing to do
@@ -1175,9 +1174,11 @@ class N3Tree(nn.Module):
 
     def _all_leaves(self):
         if self._last_all_leaves is None:
-            self._last_all_leaves = (
-                (self.child[: self.n_internal] == 0).nonzero(as_tuple=False).cpu()
+            _last_all_leaves = (self.child[: self.n_internal] == 0).nonzero(
+                as_tuple=False
             )
+            del self._last_all_leaves
+            self.register_buffer("_last_all_leaves", _last_all_leaves)
         return self._last_all_leaves
 
     def world2tree(self, indices):

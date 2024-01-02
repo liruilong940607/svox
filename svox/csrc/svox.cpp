@@ -48,8 +48,8 @@ Tensor volume_render_image(TreeSpec &, CameraSpec &, RenderOptions &);
 Tensor volume_render_backward(TreeSpec &, RaysSpec &, RenderOptions &, Tensor);
 Tensor volume_render_image_backward(TreeSpec &, CameraSpec &, RenderOptions &, Tensor);
 
-std::tuple<Tensor, Tensor, Tensor> volume_sample(TreeSpec &, RaysSpec &,
-                                                 RenderOptions &);
+std::tuple<Tensor, Tensor, Tensor, Tensor> volume_sample(TreeSpec &, RaysSpec &,
+                                                         RenderOptions &);
 
 std::tuple<Tensor, Tensor, Tensor> se_grad(TreeSpec &, RaysSpec &, Tensor,
                                            RenderOptions &);
