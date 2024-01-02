@@ -26,8 +26,8 @@
 
 // This file contains only forward declarations and Python bindings
 
-#include <torch/extension.h>
 #include <cstdint>
+#include <torch/extension.h>
 #include <vector>
 
 #include "data_spec.hpp"
@@ -35,28 +35,25 @@
 namespace py = pybind11;
 using torch::Tensor;
 
-std::vector<torch::Tensor> grid_weight_render(torch::Tensor data,
-                                              CameraSpec& cam,
-                                              RenderOptions& opt,
-                                              torch::Tensor offset,
+std::vector<torch::Tensor> grid_weight_render(torch::Tensor data, CameraSpec &cam,
+                                              RenderOptions &opt, torch::Tensor offset,
                                               torch::Tensor scaling);
 
-QueryResult query_vertical(TreeSpec&, Tensor);
-Tensor query_vertical_backward(TreeSpec&, Tensor, Tensor);
-void assign_vertical(TreeSpec&, Tensor, Tensor);
+QueryResult query_vertical(TreeSpec &, Tensor);
+Tensor query_vertical_backward(TreeSpec &, Tensor, Tensor);
+void assign_vertical(TreeSpec &, Tensor, Tensor);
 
-Tensor volume_render(TreeSpec&, RaysSpec&, RenderOptions&);
-Tensor volume_render_image(TreeSpec&, CameraSpec&, RenderOptions&);
-Tensor volume_render_backward(TreeSpec&, RaysSpec&, RenderOptions&, Tensor);
-Tensor volume_render_image_backward(TreeSpec&, CameraSpec&, RenderOptions&,
-                                    Tensor);
+Tensor volume_render(TreeSpec &, RaysSpec &, RenderOptions &);
+Tensor volume_render_image(TreeSpec &, CameraSpec &, RenderOptions &);
+Tensor volume_render_backward(TreeSpec &, RaysSpec &, RenderOptions &, Tensor);
+Tensor volume_render_image_backward(TreeSpec &, CameraSpec &, RenderOptions &, Tensor);
 
-std::tuple<Tensor, Tensor, Tensor> se_grad(TreeSpec&, RaysSpec&, Tensor,
-                                           RenderOptions&);
-std::tuple<Tensor, Tensor, Tensor> se_grad_persp(TreeSpec&, CameraSpec&,
-                                                 RenderOptions&, Tensor);
+std::tuple<Tensor, Tensor, Tensor> se_grad(TreeSpec &, RaysSpec &, Tensor,
+                                           RenderOptions &);
+std::tuple<Tensor, Tensor, Tensor> se_grad_persp(TreeSpec &, CameraSpec &,
+                                                 RenderOptions &, Tensor);
 
-Tensor calc_corners(TreeSpec&, Tensor);
+Tensor calc_corners(TreeSpec &, Tensor);
 
 std::tuple<Tensor, Tensor> quantize_median_cut(Tensor data, Tensor, int32_t);
 
@@ -89,8 +86,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     py::class_<RenderOptions>(m, "RenderOptions")
         .def(py::init<>())
         .def_readwrite("step_size", &RenderOptions::step_size)
-        .def_readwrite("background_brightness",
-                       &RenderOptions::background_brightness)
+        .def_readwrite("background_brightness", &RenderOptions::background_brightness)
         .def_readwrite("ndc_width", &RenderOptions::ndc_width)
         .def_readwrite("ndc_height", &RenderOptions::ndc_height)
         .def_readwrite("ndc_focal", &RenderOptions::ndc_focal)

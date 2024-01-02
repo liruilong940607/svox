@@ -25,18 +25,20 @@
 Volume rendering utilities
 """
 
-import torch
-import numpy as np
-from torch import nn, autograd
 from collections import namedtuple
 from warnings import warn
 
-from svox.helpers import _get_c_extension, LocalIndex, DataFormat
+import numpy as np
+import torch
+from torch import autograd, nn
 
-NDCConfig = namedtuple('NDCConfig', ["width", "height", "focal"])
-Rays = namedtuple('Rays', ["origins", "dirs", "viewdirs"])
+from svox.helpers import DataFormat, LocalIndex, _get_c_extension
+
+NDCConfig = namedtuple("NDCConfig", ["width", "height", "focal"])
+Rays = namedtuple("Rays", ["origins", "dirs", "viewdirs"])
 
 _C = _get_c_extension()
+
 
 def _rays_spec_from_rays(rays):
     spec = _C.RaysSpec()
@@ -44,6 +46,7 @@ def _rays_spec_from_rays(rays):
     spec.dirs = rays.dirs
     spec.vdirs = rays.viewdirs
     return spec
+
 
 def _make_camera_spec(c2w, width, height, fx, fy):
     spec = _C.CameraSpec()
@@ -53,6 +56,7 @@ def _make_camera_spec(c2w, width, height, fx, fy):
     spec.fx = fx
     spec.fy = fy
     return spec
+
 
 class _VolumeRenderFunction(autograd.Function):
     @staticmethod
@@ -66,10 +70,16 @@ class _VolumeRenderFunction(autograd.Function):
     @staticmethod
     def backward(ctx, grad_out):
         if ctx.needs_input_grad[0]:
-            return _C.volume_render_backward(
-                ctx.tree, ctx.rays, ctx.opt, grad_out.contiguous()
-            ), None, None, None
+            return (
+                _C.volume_render_backward(
+                    ctx.tree, ctx.rays, ctx.opt, grad_out.contiguous()
+                ),
+                None,
+                None,
+                None,
+            )
         return None, None, None, None
+
 
 class _VolumeRenderImageFunction(autograd.Function):
     @staticmethod
@@ -83,9 +93,14 @@ class _VolumeRenderImageFunction(autograd.Function):
     @staticmethod
     def backward(ctx, grad_out):
         if ctx.needs_input_grad[0]:
-            return _C.volume_render_image_backward(
-                ctx.tree, ctx.cam, ctx.opt, grad_out.contiguous()
-            ), None, None, None
+            return (
+                _C.volume_render_image_backward(
+                    ctx.tree, ctx.cam, ctx.opt, grad_out.contiguous()
+                ),
+                None,
+                None,
+                None,
+            )
         return None, None, None, None
 
 
@@ -111,19 +126,23 @@ def convert_to_ndc(origins, directions, focal, w, h, near=1.0):
     directions = torch.stack([d0, d1, d2], -1)
     return origins, directions
 
+
 class VolumeRenderer(nn.Module):
     """
     Volume renderer
     """
-    def __init__(self, tree,
-            step_size : float=1e-3,
-            background_brightness : float=1.0,
-            ndc : NDCConfig=None,
-            min_comp : int=0,
-            max_comp : int=-1,
-            density_softplus : bool=False,
-            rgb_padding : float=0.0,
-        ):
+
+    def __init__(
+        self,
+        tree,
+        step_size: float = 1e-3,
+        background_brightness: float = 1.0,
+        ndc: NDCConfig = None,
+        min_comp: int = 0,
+        max_comp: int = -1,
+        density_softplus: bool = False,
+        rgb_padding: float = 0.0,
+    ):
         """
         Construct volume renderer associated with given N^3 tree.
         You can construct multiple renderer instances for the same tree;
@@ -186,7 +205,7 @@ class VolumeRenderer(nn.Module):
                 self._data_format = DataFormat(f"SH{(ddim - 1) // 3}")
         self.tree._weight_accum = None
 
-    def forward(self, rays : Rays, cuda=True, fast=False):
+    def forward(self, rays: Rays, cuda=True, fast=False):
         """
         Render a batch of rays. Differentiable.
 
@@ -203,9 +222,12 @@ class VolumeRenderer(nn.Module):
                 or :code:`(tree.data_dim - 1) / tree.data_format.basis_dim` else.
         """
         if not cuda or _C is None or not self.tree.data.is_cuda:
-            assert self.data_format.format in [DataFormat.RGBA, DataFormat.SH], \
-                 "Unsupported data format for slow volume rendering"
+            assert self.data_format.format in [
+                DataFormat.RGBA,
+                DataFormat.SH,
+            ], "Unsupported data format for slow volume rendering"
             warn("Using slow volume rendering, should only be used for debugging")
+
             def dda_unit(cen, invdir):
                 """
                 voxel aabb ray tracing step
@@ -216,7 +238,9 @@ class VolumeRenderer(nn.Module):
                 """
                 B = invdir.shape[0]
                 tmin = torch.zeros((B,), dtype=cen.dtype, device=cen.device)
-                tmax = torch.full((B,), fill_value=1e9, dtype=cen.dtype, device=cen.device)
+                tmax = torch.full(
+                    (B,), fill_value=1e9, dtype=cen.dtype, device=cen.device
+                )
                 for i in range(3):
                     t1 = -cen[..., i] * invdir[..., i]
                     t2 = t1 + invdir[..., i]
@@ -233,7 +257,8 @@ class VolumeRenderer(nn.Module):
             sh_mult = None
             if self.data_format.format == DataFormat.SH:
                 from svox import sh
-                sh_order = int(self.data_format.basis_dim ** 0.5) - 1
+
+                sh_order = int(self.data_format.basis_dim**0.5) - 1
                 sh_mult = sh.eval_sh_bases(sh_order, viewdirs)[:, None]
 
             invdirs = 1.0 / (dirs + 1e-9)
@@ -254,13 +279,15 @@ class VolumeRenderer(nn.Module):
                 subcube_tmin, subcube_tmax = dda_unit(pos_t, invdirs)
 
                 delta_t = (subcube_tmax - subcube_tmin) * cube_sz + self.step_size
-                att = torch.exp(- delta_t * torch.relu(rgba[..., -1]) * delta_scale[good_indices])
+                att = torch.exp(
+                    -delta_t * torch.relu(rgba[..., -1]) * delta_scale[good_indices]
+                )
                 weight = light_intensity[good_indices] * (1.0 - att)
                 rgb = rgba[:, :-1]
                 if self.data_format.format != DataFormat.RGBA:
                     # [B', 3, n_sh_coeffs]
                     rgb_sh = rgb.reshape(-1, 3, self.data_format.basis_dim)
-                    rgb = torch.sigmoid(torch.sum(sh_mult * rgb_sh, dim=-1))   # [B', 3]
+                    rgb = torch.sigmoid(torch.sum(sh_mult * rgb_sh, dim=-1))  # [B', 3]
                 else:
                     rgb = torch.sigmoid(rgb)
                 rgb = weight[:, None] * rgb[:, :3]
@@ -284,11 +311,12 @@ class VolumeRenderer(nn.Module):
             self.tree.data,
             self.tree._spec(),
             _rays_spec_from_rays(rays),
-            self._get_options(fast)
+            self._get_options(fast),
         )
 
-    def render_persp(self, c2w, width=800, height=800, fx=1111.111, fy=None,
-            cuda=True, fast=False):
+    def render_persp(
+        self, c2w, width=800, height=800, fx=1111.111, fy=None, cuda=True, fast=False
+    ):
         """
         Render a perspective image. Differentiable.
 
@@ -309,19 +337,23 @@ class VolumeRenderer(nn.Module):
 
         """
         if not cuda or _C is None or not self.tree.data.is_cuda:
-            return self(VolumeRenderer.persp_rays(c2w, width, height, fx, fy),
-                        cuda=False, fast=fast)
+            return self(
+                VolumeRenderer.persp_rays(c2w, width, height, fx, fy),
+                cuda=False,
+                fast=fast,
+            )
         if fy is None:
             fy = fx
         return _VolumeRenderImageFunction.apply(
             self.tree.data,
             self.tree._spec(),
-            _make_camera_spec(c2w.to(dtype=self.tree.data.dtype),
-                              width, height, fx, fy),
-            self._get_options(fast)
+            _make_camera_spec(
+                c2w.to(dtype=self.tree.data.dtype), width, height, fx, fy
+            ),
+            self._get_options(fast),
         )
 
-    def se_grad(self, rays : Rays, colors):
+    def se_grad(self, rays: Rays, colors):
         """
         Returns rendered color + gradient and Hessian diagonal of the total
         squared error:
@@ -345,8 +377,12 @@ class VolumeRenderer(nn.Module):
         """
         if _C is None or not self.tree.data.is_cuda:
             assert False, "Not supported in current version, use CUDA kernel"
-        return _C.se_grad(self.tree._spec(), _rays_spec_from_rays(rays),
-                          colors, self._get_options(False))
+        return _C.se_grad(
+            self.tree._spec(),
+            _rays_spec_from_rays(rays),
+            colors,
+            self._get_options(False),
+        )
 
     def se_grad_persp(self, c2w, colors, width=800, height=800, fx=1111.111, fy=None):
         """
@@ -379,10 +415,12 @@ class VolumeRenderer(nn.Module):
             assert False, "Not supported in current version, use CUDA kernel"
         return _C.se_grad_persp(
             self.tree._spec(),
-            _make_camera_spec(c2w.to(dtype=self.tree.data.dtype),
-                              width, height, fx, fy),
+            _make_camera_spec(
+                c2w.to(dtype=self.tree.data.dtype), width, height, fx, fy
+            ),
             self._get_options(False),
-            colors)
+            colors,
+        )
 
     @staticmethod
     def persp_rays(c2w, width=800, height=800, fx=1111.111, fy=None):
@@ -419,11 +457,7 @@ class VolumeRenderer(nn.Module):
         dirs = torch.matmul(c2w[None, :3, :3].double(), dirs[..., None])[..., 0].float()
         vdirs = dirs
 
-        return Rays(
-            origins=origins,
-            dirs=dirs,
-            viewdirs=vdirs
-        )
+        return Rays(origins=origins, dirs=dirs, viewdirs=vdirs)
 
     @property
     def data_format(self):

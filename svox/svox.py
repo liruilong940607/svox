@@ -25,13 +25,15 @@
 Sparse voxel N^3 tree
 """
 
-import os.path as osp
-import torch
-import numpy as np
 import math
-from torch import nn, autograd
-from svox.helpers import N3TreeView, DataFormat, LocalIndex, _get_c_extension
+import os.path as osp
 from warnings import warn
+
+import numpy as np
+import torch
+from torch import autograd, nn
+
+from svox.helpers import DataFormat, LocalIndex, N3TreeView, _get_c_extension
 
 _C = _get_c_extension()
 

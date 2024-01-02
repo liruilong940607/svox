@@ -24,34 +24,31 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <torch/extension.h>
 #include <algorithm>
-#include <vector>
-#include <utility>
-#include <tuple>
-#include <limits>
 #include <cstdint>
+#include <limits>
+#include <torch/extension.h>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 namespace {
 
-template <class scalar_t>
-struct Comparer {
+template <class scalar_t> struct Comparer {
     Comparer(const torch::TensorAccessor<scalar_t, 2> data) : data(data) {}
-    bool operator()(int64_t a, int64_t b) const {
-        return data[a][dim] < data[b][dim];
-    }
+    bool operator()(int64_t a, int64_t b) const { return data[a][dim] < data[b][dim]; }
     const torch::TensorAccessor<scalar_t, 2> data;
     int dim;
 };
 
 template <class scalar_t>
-void _quantize_median_cut_impl(
-    const torch::TensorAccessor<scalar_t, 2> data,
-    const torch::TensorAccessor<scalar_t, 1> weights,
-    std::vector<int64_t>& tmp_rev_map,
-    torch::TensorAccessor<scalar_t, 2> colors_out,
-    torch::TensorAccessor<int32_t, 1> color_id_map_out, int32_t order,
-    int64_t l, int64_t r, int32_t& color_idx, Comparer<scalar_t>& comp) {
+void _quantize_median_cut_impl(const torch::TensorAccessor<scalar_t, 2> data,
+                               const torch::TensorAccessor<scalar_t, 1> weights,
+                               std::vector<int64_t> &tmp_rev_map,
+                               torch::TensorAccessor<scalar_t, 2> colors_out,
+                               torch::TensorAccessor<int32_t, 1> color_id_map_out,
+                               int32_t order, int64_t l, int64_t r, int32_t &color_idx,
+                               Comparer<scalar_t> &comp) {
     const int K = data.size(1);
     scalar_t total_weight = 0.0;
     const bool use_weights = weights.size(0) > 0;
@@ -61,10 +58,12 @@ void _quantize_median_cut_impl(
             const int64_t ii = tmp_rev_map[i];
             for (int j = 0; j < K; ++j) {
                 scalar_t entry = data[ii][j];
-                if (use_weights) entry *= weights[ii];
+                if (use_weights)
+                    entry *= weights[ii];
                 color[j] += entry;
             }
-            if (use_weights) total_weight += weights[ii];
+            if (use_weights)
+                total_weight += weights[ii];
             color_id_map_out[ii] = color_idx;
         }
         if (!use_weights) {
@@ -83,7 +82,8 @@ void _quantize_median_cut_impl(
             std::vector<scalar_t> mins(K, MAX_VAL), maxs(K, -MAX_VAL);
             for (int i = l; i < r; ++i) {
                 const int64_t ii = tmp_rev_map[i];
-                if (use_weights) total_weight += weights[ii];
+                if (use_weights)
+                    total_weight += weights[ii];
                 for (int j = 0; j < K; ++j) {
                     const scalar_t val = data[ii][j];
                     maxs[j] = std::max(maxs[j], val);
@@ -116,18 +116,16 @@ void _quantize_median_cut_impl(
         }
 
         _quantize_median_cut_impl(data, weights, tmp_rev_map, colors_out,
-                                  color_id_map_out, order - 1, l, m, color_idx,
-                                  comp);
+                                  color_id_map_out, order - 1, l, m, color_idx, comp);
         _quantize_median_cut_impl(data, weights, tmp_rev_map, colors_out,
-                                  color_id_map_out, order - 1, m, r, color_idx,
-                                  comp);
+                                  color_id_map_out, order - 1, m, r, color_idx, comp);
     }
 }
 
-}  // namespace
+} // namespace
 
-std::tuple<torch::Tensor, torch::Tensor> quantize_median_cut(
-    torch::Tensor data, torch::Tensor weights, int32_t order) {
+std::tuple<torch::Tensor, torch::Tensor>
+quantize_median_cut(torch::Tensor data, torch::Tensor weights, int32_t order) {
     TORCH_CHECK(data.is_contiguous());
     TORCH_CHECK(weights.is_contiguous());
     TORCH_CHECK(!data.is_cuda());
@@ -135,23 +133,19 @@ std::tuple<torch::Tensor, torch::Tensor> quantize_median_cut(
     TORCH_CHECK(data.dim() == 2);
     const int32_t N_COLORS = 1 << order;
     TORCH_CHECK(N_COLORS <= data.size(0));
-    auto options = at::TensorOptions()
-                       .dtype(at::kInt)
-                       .layout(data.layout())
-                       .device(data.device());
-    torch::Tensor colors =
-        torch::zeros({N_COLORS, data.size(1)}, data.options());
+    auto options =
+        at::TensorOptions().dtype(at::kInt).layout(data.layout()).device(data.device());
+    torch::Tensor colors = torch::zeros({N_COLORS, data.size(1)}, data.options());
     torch::Tensor color_id_map = torch::zeros({data.size(0)}, options);
     std::vector<int64_t> tmp(data.size(0));
     std::iota(tmp.begin(), tmp.end(), 0);
     AT_DISPATCH_FLOATING_TYPES(data.type(), __FUNCTION__, [&] {
         int32_t color_idx = 0;
         Comparer<scalar_t> comp(data.accessor<scalar_t, 2>());
-        _quantize_median_cut_impl<scalar_t>(
-            comp.data, weights.accessor<scalar_t, 1>(), tmp,
-            colors.accessor<scalar_t, 2>(), color_id_map.accessor<int32_t, 1>(),
-            order, 0, data.size(0), color_idx, comp);
+        _quantize_median_cut_impl<scalar_t>(comp.data, weights.accessor<scalar_t, 1>(),
+                                            tmp, colors.accessor<scalar_t, 2>(),
+                                            color_id_map.accessor<int32_t, 1>(), order,
+                                            0, data.size(0), color_idx, comp);
     });
-    return std::template tuple<torch::Tensor, torch::Tensor>(colors,
-                                                             color_id_map);
+    return std::template tuple<torch::Tensor, torch::Tensor>(colors, color_id_map);
 }

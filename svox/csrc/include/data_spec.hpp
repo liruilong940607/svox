@@ -30,15 +30,14 @@
 #include <torch/extension.h>
 #include <tuple>
 
-#define DEVICE_GUARD(_ten) \
+#define DEVICE_GUARD(_ten)                                                             \
     const at::cuda::OptionalCUDAGuard device_guard(device_of(_ten));
 
 // Changed from x.type().is_cuda() due to deprecation
 #define CHECK_CUDA(x) TORCH_CHECK(x.is_cuda(), #x " must be a CUDA tensor")
-#define CHECK_CONTIGUOUS(x) \
-    TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
-#define CHECK_INPUT(x) \
-    CHECK_CUDA(x);     \
+#define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
+#define CHECK_INPUT(x)                                                                 \
+    CHECK_CUDA(x);                                                                     \
     CHECK_CONTIGUOUS(x)
 
 enum DataFormat {

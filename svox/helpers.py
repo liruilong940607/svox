@@ -21,8 +21,9 @@
 #  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 #  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 #  POSSIBILITY OF SUCH DAMAGE.
-import torch
 import numpy as np
+import torch
+
 
 class N3TreeView:
     def __init__(self, tree, key):
@@ -31,8 +32,9 @@ class N3TreeView:
         self.single_key = False
         if isinstance(key, tuple) and len(key) >= 3:
             # Handle tree[x, y, z[, c]]
-            main_key = torch.tensor(key[:3], dtype=tree.data.dtype,
-                        device=tree.data.device).reshape(1, 3)
+            main_key = torch.tensor(
+                key[:3], dtype=tree.data.dtype, device=tree.data.device
+            ).reshape(1, 3)
             if len(key) > 3:
                 key = (main_key, *key[3:])
             else:
@@ -156,7 +158,9 @@ class N3TreeView:
         :return: (n_leaves, 3) float
         """
         self._check_ver()
-        return (self.tree.N ** (-self.depths.float() - 1.0))[:, None] / self.tree.invradius
+        return (self.tree.N ** (-self.depths.float() - 1.0))[
+            :, None
+        ] / self.tree.invradius
 
     @property
     def lengths_local(self):
@@ -180,8 +184,9 @@ class N3TreeView:
         :return: (n_leaves, 3) float
         """
         self._check_ver()
-        return (self.tree._calc_corners(self._indexer())
-                - self.tree.offset) / self.tree.invradius
+        return (
+            self.tree._calc_corners(self._indexer()) - self.tree.offset
+        ) / self.tree.invradius
 
     @property
     def corners_local(self):
@@ -211,9 +216,10 @@ class N3TreeView:
         length = self.lengths.to(device=device)
         if length.ndim == 1:
             length = length[:, None]
-        u = torch.rand((corn.shape[0], n_samples, 3),
-                device=device,
-                dtype=length.dtype) * length[:, None]
+        u = (
+            torch.rand((corn.shape[0], n_samples, 3), device=device, dtype=length.dtype)
+            * length[:, None]
+        )
         return corn[:, None] + u
 
     def sample_local(self, n_samples):
@@ -226,9 +232,12 @@ class N3TreeView:
         self._check_ver()
         corn = self.corners_local
         length = self.lengths_local
-        u = torch.rand((corn.shape[0], n_samples, 3),
-                device=length.device,
-                dtype=length.dtype) * length[:, None, None]
+        u = (
+            torch.rand(
+                (corn.shape[0], n_samples, 3), device=length.device, dtype=length.dtype
+            )
+            * length[:, None, None]
+        )
         return corn[:, None] + u
 
     def aux(self, arr):
@@ -318,8 +327,12 @@ class N3TreeView:
         return torch.stack(self.key[:4], dim=-1)
 
     def _require_subindex(self):
-        return isinstance(self.key, tuple) and len(self.key) == 5 and \
-            not isinstance(self.key[-1], slice) and not isinstance(self.key[-1], int)
+        return (
+            isinstance(self.key, tuple)
+            and len(self.key) == 5
+            and not isinstance(self.key[-1], slice)
+            and not isinstance(self.key[-1], int)
+        )
 
     def _unique_node_key(self):
         if self._packed_ids is None:
@@ -331,61 +344,113 @@ class N3TreeView:
     def _check_ver(self):
         if self.tree._ver > self._tree_ver:
             self.key = self._packed_ids = None
-            raise RuntimeError("N3TreeView has been invalidated because tree " +
-                    "data layout has changed")
+            raise RuntimeError(
+                "N3TreeView has been invalidated because tree "
+                + "data layout has changed"
+            )
+
 
 # Redirect functions to Tensor
 def _redirect_funcs():
-    redir_funcs = ['__floordiv__', '__mod__', '__div__',
-                   '__eq__', '__ne__', '__ge__', '__gt__', '__le__',
-                   '__lt__', '__floor__', '__ceil__', '__round__', '__len__',
-                   'item', 'size', 'dim', 'numel']
-    redir_grad_funcs = ['__add__', '__mul__', '__sub__',
-                   '__mod__', '__div__', '__truediv__',
-                   '__radd__', '__rsub__', '__rmul__',
-                   '__rdiv__', '__abs__', '__pos__', '__neg__',
-                   '__len__', 'clamp', 'clamp_max', 'clamp_min', 'relu', 'sigmoid',
-                   'max', 'min', 'mean', 'sum', '__getitem__']
+    redir_funcs = [
+        "__floordiv__",
+        "__mod__",
+        "__div__",
+        "__eq__",
+        "__ne__",
+        "__ge__",
+        "__gt__",
+        "__le__",
+        "__lt__",
+        "__floor__",
+        "__ceil__",
+        "__round__",
+        "__len__",
+        "item",
+        "size",
+        "dim",
+        "numel",
+    ]
+    redir_grad_funcs = [
+        "__add__",
+        "__mul__",
+        "__sub__",
+        "__mod__",
+        "__div__",
+        "__truediv__",
+        "__radd__",
+        "__rsub__",
+        "__rmul__",
+        "__rdiv__",
+        "__abs__",
+        "__pos__",
+        "__neg__",
+        "__len__",
+        "clamp",
+        "clamp_max",
+        "clamp_min",
+        "relu",
+        "sigmoid",
+        "max",
+        "min",
+        "mean",
+        "sum",
+        "__getitem__",
+    ]
+
     def redirect_func(redir_func, grad=False):
         def redir_impl(self, *args, **kwargs):
             return getattr(self.values if grad else self.values_nograd, redir_func)(
-                    *args, **kwargs)
+                *args, **kwargs
+            )
+
         setattr(N3TreeView, redir_func, redir_impl)
+
     for redir_func in redir_funcs:
         redirect_func(redir_func)
     for redir_func in redir_grad_funcs:
         redirect_func(redir_func, grad=True)
+
+
 _redirect_funcs()
 
 
 def _get_c_extension():
     from warnings import warn
+
     try:
         import svox.csrc as _C
+
         if not hasattr(_C, "query_vertical"):
             _C = None
     except:
         _C = None
 
     if _C is None:
-        warn("CUDA extension svox.csrc could not be loaded! " +
-             "Operations will be slow.\n" +
-             "Please do not import svox in the SVOX source directory.")
+        warn(
+            "CUDA extension svox.csrc could not be loaded! "
+            + "Operations will be slow.\n"
+            + "Please do not import svox in the SVOX source directory."
+        )
     return _C
+
 
 class LocalIndex:
     """
     To query N3Tree using 'local' index :math:`[0,1]^3`,
     tree[LocalIndex(points)] where points (N, 3)
     """
+
     def __init__(self, val):
         self.val = val
+
 
 class DataFormat:
     RGBA = 0
     SH = 1
     SG = 2
     ASG = 3
+
     def __init__(self, txt):
         nonalph_idx = [c.isalpha() for c in txt]
         if False in nonalph_idx:
@@ -396,8 +461,9 @@ class DataFormat:
             self.data_dim = 3 * self.basis_dim + 1
             if format_type == "SH":
                 self.format = DataFormat.SH
-                assert int(self.basis_dim ** 0.5) ** 2 == self.basis_dim, \
-                       "SH basis dim must be square number"
+                assert (
+                    int(self.basis_dim**0.5) ** 2 == self.basis_dim
+                ), "SH basis dim must be square number"
                 assert self.basis_dim <= 25, "SH only supported up to basis_dim 25"
             elif format_type == "SG":
                 self.format = DataFormat.SG
