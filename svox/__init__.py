@@ -27,6 +27,6 @@ CUDA accelerated PyTorch N^3 tree library.
 #  POSSIBILITY OF SUCH DAMAGE.
 
 from .helpers import LocalIndex, N3TreeView
-from .renderer import NDCConfig, Rays, VolumeRenderer, volume_sample
+from .renderer import NDCConfig, Rays, VolumeRenderer, volume_sample, volume_accum
 from .svox import N3Tree
 from .version import __version__

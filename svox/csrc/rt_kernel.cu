@@ -840,6 +840,57 @@ __device__ __inline__ void trace_ray_write_samples(
 }
 
 template <typename scalar_t>
+__device__ __inline__ void
+trace_ray_accum(
+    PackedTreeSpec<scalar_t> &__restrict__ tree, SingleRaySpec<scalar_t> ray,
+    RenderOptions &__restrict__ opt) {
+    const scalar_t delta_scale = _get_delta_scale(tree.scaling, ray.dir);
+
+    scalar_t tmin, tmax;
+    scalar_t invdir[3];
+    const int data_dim = tree.data.size(4);
+
+#pragma unroll
+    for (int i = 0; i < 3; ++i) {
+        invdir[i] = 1.0 / (ray.dir[i] + 1e-9);
+    }
+    _dda_unit(ray.origin, invdir, &tmin, &tmax);
+
+    if (tmax < 0 || tmin > tmax) {
+        // Ray doesn't hit box
+        return;
+    } else {
+        tmin = max(tmin, opt.near_plane / delta_scale);
+        tmax = min(tmax, opt.far_plane / delta_scale);
+
+        scalar_t pos[3];
+
+        scalar_t t = tmin;
+        scalar_t cube_sz;
+        while (t < tmax) {
+            for (int j = 0; j < 3; ++j) {
+                pos[j] = ray.origin[j] + t * ray.dir[j];
+            }
+
+            int64_t node_id;
+            scalar_t *tree_val = query_single_from_root<scalar_t>(
+                tree.data, tree.child, pos, &cube_sz,
+                tree.weight_accum != nullptr ? &node_id : nullptr);
+            atomicAdd(&tree_val[data_dim - 1], (scalar_t)1.0);
+            
+            scalar_t att;
+            scalar_t subcube_tmin, subcube_tmax;
+            _dda_unit(pos, invdir, &subcube_tmin, &subcube_tmax);
+
+            const scalar_t t_subcube = (subcube_tmax - subcube_tmin) / cube_sz;
+            const scalar_t delta_t = t_subcube + opt.step_size;
+            t += delta_t;
+        }
+    }
+}
+
+
+template <typename scalar_t>
 __global__ void render_ray_kernel(
     PackedTreeSpec<scalar_t> tree, PackedRaysSpec<scalar_t> rays, RenderOptions opt,
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> out) {
@@ -880,6 +931,18 @@ __global__ void sample_along_ray_kernel(
     trace_ray_write_samples<scalar_t>(
         tree, SingleRaySpec<scalar_t>{origin, dir, &rays.vdirs[tid][0]}, opt, tid,
         offset[tid], t1_out, t2_out, rayid_out);
+}
+
+template <typename scalar_t>
+__global__ void trace_ray_accum_kernel(
+    PackedTreeSpec<scalar_t> tree, PackedRaysSpec<scalar_t> rays, RenderOptions opt) {
+    CUDA_GET_THREAD_ID(tid, rays.origins.size(0));
+    scalar_t origin[3] = {rays.origins[tid][0], rays.origins[tid][1],
+                          rays.origins[tid][2]};
+    transform_coord<scalar_t>(origin, tree.offset, tree.scaling);
+    scalar_t dir[3] = {rays.dirs[tid][0], rays.dirs[tid][1], rays.dirs[tid][2]};
+    trace_ray_accum<scalar_t>(
+        tree, SingleRaySpec<scalar_t>{origin, dir, &rays.vdirs[tid][0]}, opt);
 }
 
 template <typename scalar_t>
@@ -1174,6 +1237,20 @@ volume_sample(TreeSpec &tree, RaysSpec &rays, RenderOptions &opt) {
     CUDA_CHECK_ERRORS;
     return std::template tuple<torch::Tensor, torch::Tensor, torch::Tensor,
                                torch::Tensor>(t1, t2, packed_info, rayid);
+}
+
+void volume_accum(TreeSpec &tree, RaysSpec &rays, RenderOptions &opt) {
+    tree.check();
+    rays.check();
+    DEVICE_GUARD(tree.data);
+    const auto Q = rays.origins.size(0);
+
+    auto_cuda_threads();
+    const int blocks = CUDA_N_BLOCKS_NEEDED(Q, cuda_n_threads);
+    AT_DISPATCH_FLOATING_TYPES(rays.origins.type(), __FUNCTION__, [&] {
+        device::trace_ray_accum_kernel<scalar_t><<<blocks, cuda_n_threads>>>(
+            tree, rays, opt);
+    });
 }
 
 torch::Tensor volume_render_image(TreeSpec &tree, CameraSpec &cam, RenderOptions &opt) {

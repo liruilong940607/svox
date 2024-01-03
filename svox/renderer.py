@@ -145,6 +145,13 @@ def volume_sample(
     opts.far_plane = far_plane
     return _C.volume_sample(tree._spec(), _rays_spec_from_rays(rays), opts)
 
+def volume_accum(tree, rays: Rays, near_plane: float = 0.0, far_plane: float = 1e10):
+    opts = _C.RenderOptions()
+    opts.step_size = 1e-4
+    opts.near_plane = near_plane
+    opts.far_plane = far_plane
+    return _C.volume_accum(tree._spec(), _rays_spec_from_rays(rays), opts)
+
 
 class VolumeRenderer(nn.Module):
     """
